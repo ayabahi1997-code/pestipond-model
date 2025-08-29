@@ -1,0 +1,367 @@
+---
+title: "Pond effciciency"
+author: "Aya Bahi"
+date: "08/02/2022"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Description**
+
+-This file is about the building of the PESTIPOND model.
+
+**Set the file and call libraries**
+```{r include=FALSE}
+
+shell("cls")                                          #clear the console
+rm(list=ls())                                         #clear the environment
+if(!is.null(dev.list())) dev.off()                    #clear all plots
+setwd(getwd())                                        #set the location of the file                                           
+
+library(tibble)                                       #to convert into a data_1 frame
+library(deSolve)                                      #call desolve library for the ode function
+library(ggplot2)                                      #for plots
+library(rootSolve)                                    #for jacobian
+library(deTestSet)                                    #for more solvers
+library(writexl)
+library(sensitivity)
+library(ODEsensitivity)
+library(gtools)
+```
+
+**Read the data** 
+```{r}
+
+data_1 <- read.csv2("data_1_Rampillon.csv", header = FALSE, skip=0, nrows = 101)          #read the CSV file of data_1 avec sep = ; et dec = ,
+names(data_1)=data_1[1,]                                                        #rename the columns of the data_1 frame by the names in excel
+data_1 <- data_1[-1,1:8]                                                       #delete the first line
+row.names(data_1)= data_1[,2]                                                   #rename the lines of data_1 with step i
+
+data_1$Date       <- as.Date(data_1$Day , format = "%d/%m/%Y")                  #convert day (d/m/y) to date
+data_1            <- data_1[,-1]                                                #remove the old date column
+data_1            <- as.data.frame(data_1)                                      #convert to a data frame
+data_1            <- data_1[,c(8,1:7)]                                        #reorder columns
+
+for (i in 2:ncol(data_1)){
+  
+  data_1[,i] <- as.numeric(data_1[,i])                                          #convert to numeric
+  
+}
+data_1 <- as.data.frame(data_1)
+
+A         <- 5269  #m2
+Mveg      <- 0.6*11e6/100 #g
+
+data_1$`Cin (ug/l)` <- 20
+
+```
+
+**Build the input functions**
+We don't need to calculate hw with a water balance, we can deduce it from hw = H - ds; with H=1m, and ds is deducted from Msed
+```{r}
+
+Qin       <- approxfun(data_1$`Step i`, data_1$`Qin (l/s)`, method = 'constant', rule = 2)
+Qout      <- approxfun(data_1$`Step i`, data_1$`Qout (l/s)`,method = 'constant', rule = 2)
+Cin       <- approxfun(data_1$`Step i`, data_1$`Cin (ug/l)`,method = 'constant', rule = 2)
+TC        <- approxfun(data_1$`Step i`, data_1$`T (°C)`,method = 'constant', rule = 2)
+
+inputs                 <- NULL
+inputs$'time'          <- seq(1,100,by=0.01)
+  
+inputs                 <- as.data.frame(inputs)
+  
+inputs$'TC'            <- TC(inputs$'time')
+inputs$'Qin(l/s)'      <- Qin(inputs$'time')
+inputs$'Qout(l/s)'     <- Qout(inputs$'time')
+inputs$'Cdiss_in(ug/l)'<- Cin(inputs$'time')
+```
+
+**Now we will write down this model equation in R :**
+```{r}
+
+model <- function(t, y, parms){
+
+    with(as.list(c(parms,y)),{
+
+      dCdiss <- 1/(A*(1-Msed/(rhob*A*10^6))*phi) * Qin(t) * Cin(t)*24*3600/1000- 1/(A*(1-Msed/(rhob*A*10^6))*phi) * Qout(t) * Cdiss*24*3600/1000 -
+        
+                (kbio_w + kp + kv) * teta ^ (TC(t)-20) *  Cdiss + kads_sed*1e3/(Kd) * Cs + kads_veg*1e3/(Kd*phi) * Cv - 
+        
+                (kads_sed  + kads_veg) * Cdiss
+      
+        
+      dCs    <- -kbio_sed * teta ^ (TC(t)-20) * Cs  - kads_sed * (1-Msed/(rhob*A*10^6)) * A/(Msed*Kd*1e-6) * Cs +
+        
+                1/Msed * kads_sed * A * (1-Msed/(rhob*A*10^6)) * 1000 * Cdiss
+      
+
+      dCv    <- -kbio_veg * teta ^ (TC(t)-20) * Cv - kads_veg * (1-Msed/(rhob*A*10^6)) * A/(Mveg*Kd*1e-6) * Cv +
+        
+                1/Mveg * kads_veg * A * (1-Msed/(rhob*A*10^6)) * 1000 * phi * Cdiss
+
+      list(c(dCdiss,dCs,dCv))
+
+    })
+}
+
+# ug/l/day
+# ug/g/day
+```
+
+**Parameters table**
+```{r}
+
+par_table            <- read.csv2("par_efficiency.csv", header = FALSE, skip=0, nrows = 64)
+names(par_table)     =par_table[2,]  
+par_table            <- par_table[c(-1,-2),1:11]                                                       
+row.names(par_table) <- 1:61                                                      
+
+for (j in 3:4) {
+    
+  k <- which(par_table[j] == 'stable')
+    
+  par_table[k,j] <- 0
+  
+}
+
+for (j in 2:ncol(par_table)){
+  
+  par_table[,j] <- as.numeric(par_table[,j])                            
+  
+}
+
+```
+
+**ODE solving**
+```{r}
+
+times <- seq(1, 100, by = 0.01)
+ds1   <- 1
+Msed  <- 1*A*10^4*ds1
+yin   <- c(Cdiss=0,Cs=0,Cv=0)
+
+if(!dir.exists(paste0(getwd(),"/out_eff/"))){dir.create(paste0(getwd(),"/out_eff/"))} 
+
+for ( i in 1:nrow(par_table)){
+  
+  parms <- c(kbio_w=par_table$kbio_w[i],kbio_sed=par_table$kbio_sed[i],kbio_veg=par_table$kbio_veg[i],
+             kp=par_table$kp[i],kv=par_table$kv[i],
+             kads_sed=0.01, kads_veg=0.01, Kd=par_table$Koc[i]*2/100,
+             teta=1.5, phi=0.95, rhob=1, A=5269, Mveg=0.6*11e6/100)
+  
+  out <- as.data.frame(ode(yin, times, model, parms, method = 'lsoda', verbose = F, atol=1e-12, rtol=1e-12))
+  
+  saveRDS(object= as.data.frame(out),file = paste0(getwd(),'/out_eff/out_',i,'.RDS'))
+  
+}
+
+
+```
+
+**Check outputs**
+```{r}
+
+out_files <- mixedsort(list.files(paste0(getwd(),'/out_eff/')))
+
+out_min  <- NULL
+out_max  <- NULL
+out_mean <- NULL
+
+for ( i in 1:length(out_files)){
+  
+  out_i <- readRDS(paste0(getwd(),'/out_eff/',out_files[i]))
+  
+  out_min$'Cdiss_min'[i] <- min(out_i$Cdiss)
+  out_min$'Cs_min'[i]    <- min(out_i$Cs)
+  out_min$'Cv_min'[i]    <- min(out_i$Cv)
+  
+  out_max$'Cdiss_max'[i] <- max(out_i$Cdiss)
+  out_max$'Cs_max'[i]    <- max(out_i$Cs)
+  out_max$'Cv_max'[i]    <- max(out_i$Cv)
+  
+  out_mean$'Cdiss_mean'[i] <- mean(out_i$Cdiss)
+  out_mean$'Cs_mean'[i]    <- mean(out_i$Cs)
+  out_mean$'Cv_mean'[i]    <- mean(out_i$Cv)
+   
+  
+}
+
+out_min  <- as.data.frame(out_min)
+out_max  <- as.data.frame(out_max)
+out_mean <- as.data.frame(out_mean)
+
+
+
+```
+
+**Plot output**
+```{r}
+out_i <- readRDS(paste0(getwd(),'/out_eff/',out_files[10]))
+
+par(mfrow=c(2,2))
+plot(times,out_i$Cdiss, col='blue',type='l',lwd=2, main='Water',ylab='ug/l', xlab = 'days')
+plot(times,out_i$Cs, col='red',type='l',lwd=2, main='Sediments',ylab='ug/g', xlab='days')
+plot(times,out_i$Cv, col='green',type='l',lwd=2, main='Vegetation',ylab='ug/g', xlab='days')
+
+```
+
+**Mass calculation**
+```{r}
+## Mass error  ####
+
+if(!dir.exists(paste0(getwd(),"/Mass_eff/"))){dir.create(paste0(getwd(),"/Mass_eff/"))} 
+
+out_files <- mixedsort(list.files(paste0(getwd(),'/out_eff/')))
+
+
+for ( j in 1:length(out_files)){
+   
+   out <- readRDS(paste0(getwd(),'/out_eff/',out_files[j]))
+  
+   kbio_w   <- parms[[1]]
+   kbio_sed <- parms[[2]]
+   kbio_veg <- parms[[3]]
+   kp       <- parms[[4]]
+   kv       <- parms[[5]]
+   kads_sed <- parms[[6]]
+   kads_veg <- parms[[7]]
+   Kd       <- parms[[8]]
+   teta     <- parms[[9]]
+   phi      <- parms[[10]]
+   rhob     <- parms[[11]]
+   
+   Mass           <- NULL
+   Mass$'time'    <- times
+   Mass$'TC'      <- TC(times)
+   
+   Mass           <- as.data.frame(Mass)
+   
+   Mw             <- NULL
+   Ms             <- NULL
+   Mv             <- NULL
+   MT             <- NULL
+   
+   Mdiss_in       <- NULL
+   Mdiss_out      <- NULL
+   
+   for ( i in 1:length(times)) {
+   
+     Mw[i] <- out$Cdiss[i] * A * (1-Msed/(rhob*A*10^6)) * phi * 1000 #ug  #we calculate the net mass in each compartment
+   
+     Ms[i] <- out$Cs[i] * Msed * phi   #ug
+   
+     Mv[i] <- out$Cv[i] * Mveg    #ug
+   
+     MT[i] <- Mw[i] + Ms[i] + Mv[i]
+   }
+   
+   Mass$'Mw' <- Mw
+   Mass$'Ms' <- Ms
+   Mass$'Mv' <- Mv
+   Mass$'MT' <- MT
+   
+   for (i in 1:length(times)){
+   
+     Mdiss_in[i]  <- Cin(times[i]) * Qin(times[i]) * 24 * 3600 /99    #ug/0.01day  
+     
+     #we set Mdiss_in(t=0)=0 to respect MB, that's why we divide the inlet mass of 10ug/L per 99 to obtain an instantaneous mass (per 0.01day).
+     
+     Mdiss_out[i] <- out$Cdiss[i]  * Qout(times[i]) * 24 * 3600 * 0.01
+     
+     #we divide the equivalent mass of 150ug/g per 100 to obtain an instantaneous mass (per 0.01day)
+   
+   }
+   
+   #even the initial conditions should respect the MB (M0 [in the pond]=M-1+Min0-Mout0-Mdeg0),if C(t=0)=0 (Mout0=Mdeg0=0)and M-1=0 ==>M0=Min0=0,then    Min should=0
+   
+   Mdiss_in[1] <- 0 
+   
+   Mass$'Min'       <- Mdiss_in
+   Mass$'Mout'      <- Mdiss_out
+   
+   Mdeg     <- NULL
+   Mdegw    <- NULL
+   Mdegs    <- NULL
+   Mdegv    <- NULL
+   
+   Mads_sed <- NULL
+   Mads_veg <- NULL
+   
+   Mdes_sed <- NULL
+   Mdes_veg <- NULL
+   
+   TE <- Mass$'TC'
+   
+   for (i in 1:length(times)){
+   
+     Mdegw[i]    <- (kbio_w + kp + kv) * teta^(TE[i]-20) *  Mw[i] * 0.01 #we correct degradation according to temperature
+   
+     Mdegs[i]    <- kbio_sed * teta^(TE[i]-20) * Ms[i] * 0.01
+   
+     Mdegv[i]    <- kbio_veg * teta^(TE[i]-20) * Mv[i] * 0.01
+   
+     Mdeg[i]     <- Mdegw[i] + Mdegs[i] + Mdegv[i]  #ug #mdeg = dm/dt
+   
+     Mads_sed[i] <- kads_sed * Mw[i] * 0.01 #adsorbed during 0.01 day
+   
+     Mads_veg[i] <- kads_veg * Mw[i] * 0.01
+   
+     Mdes_sed[i] <- kads_sed * A * (1-Msed/(rhob*A*10^6))/(Msed*Kd*1e-6) * Ms[i] * 0.01 #ug
+   
+     Mdes_veg[i] <- kads_veg * A * (1-Msed/(rhob*A*10^6))/(Mveg*Kd*1e-6) * Mv[i] * 0.01 
+   
+   }
+   
+   Mass$'Mdeg'  <- Mdeg
+   Mass$'Mdegw' <- Mdegw
+   Mass$'Mdegs' <- Mdegs
+   Mass$'Mdegv' <- Mdegv
+   
+   Mass$'Mads_sed' <- Mads_sed
+   Mass$'Mads_veg' <- Mads_veg
+   
+   Mass$'Mdes_sed' <- Mdes_sed
+   Mass$'Mdes_veg' <- Mdes_veg
+   
+   Mass <- round(Mass,4)
+   
+   saveRDS(object= as.data.frame(Mass),file = paste0(getwd(),'/Mass_eff/M_',j,'.RDS'))
+
+
+}
+
+```
+
+In this section we estimate the mass balance error err(%):
+
+![Inputs equations :](C:/aya_local/Model/R_model/BM_error.png)
+
+**Total mass balance error**
+```{r}
+
+Mass_files <- mixedsort(list.files(paste0(getwd(),'/Mass_eff/')))
+
+Mass <- NULL
+
+MBE <- NULL
+
+for (j in 1:length(Mass_files)) {
+    
+  
+  Mass <- readRDS(paste0(getwd(),'/Mass_eff/',Mass_files[j]))
+  
+  N <- length(Mass$time)
+  
+  MBE[j] <- 100*(Mass$MT[N]-Mass$MT[1]-sum(Mass$Min[2:N])+sum(Mass$Mout[2:N])+sum(Mass$Mdeg[2:N]))/sum(Mass$Min[2:N])
+
+}
+
+saveRDS(as.data.frame(MBE),paste0(getwd(),'/err_eff.RDS'))
+
+err_eff <- readRDS(paste0(getwd(),'/err_eff.RDS'))
+
+```

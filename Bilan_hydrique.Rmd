@@ -1,0 +1,306 @@
+---
+title: "Bilan_Hydrique"
+author: "Aya Bahi"
+date: '2022-08-12'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Libraries and workbook**
+```{r}
+shell("cls")                                          #clear the console
+rm(list=ls())                                         #clear the environment
+if(!is.null(dev.list())) dev.off()                    #clear all plots
+setwd(getwd())                                        #set the location of the file                                           
+
+library(tibble)                                       #to convert into a data_1 frame
+library(deSolve)                                      #call desolve library for the ode function
+library(ggplot2)                                      #for plots
+library(rootSolve)                                    #for jacobian
+library(deTestSet)                                    #for more solvers
+library(writexl)
+library(sensitivity)
+library(ODEsensitivity)
+library(openxlsx)
+
+wb <- createWorkbook()
+options("openxlsx.dateFormat" = "dd/mm/yyyy")
+
+A  <- 5268.9
+
+A  <- A + 5*10000
+
+```
+
+**1415**
+```{r}
+
+data_1415 <- read.xlsx('E:/aya_local_2/Model/data_Rampillon_Mean_1415.xlsx',sheet = 'Pluie_ETP', startRow = 3,detectDates = T, cols = 1:10)
+
+for (i in 2:10){
+  
+  data_1415[,i] <- as.numeric(data_1415[,i])                                           #convert to numeric
+  
+}
+
+Vin  <- data_1415$`Vin.(m3)`
+Vout <- data_1415$`Vout.(m3)`
+P    <- data_1415$Ptot
+ETR  <- data_1415$ETP_P
+
+
+Vw <- NULL
+
+data_1415$Vw[1] <- A*0.5
+
+Vw <- data_1415$Vw
+
+for (i in 2:nrow(data_1415)-1){
+  
+  if (Vw[i]<A*0.2){
+    
+    Vw[i] <- A*0.2
+    
+  }
+  if (Vw[i]>A*0.8){
+    
+    Vw[i] <- A*0.8
+  }
+  
+  Vw[i+1] <- Vw[i] + Vin[i]-Vout[i] + (P[i]-ETR[i])*A/1000
+}
+
+Vw[nrow(data_1415)] <- Vw[nrow(data_1415)-1]
+
+data_1415$'Vw' <- Vw
+data_1415$'hw' <- Vw/A
+
+
+addWorksheet(wb,'BH_1415')
+
+writeDataTable(wb        =  wb,
+               sheet     = 'BH_1415',
+               x         =  data_1415,
+               bandedCols = T)
+
+saveWorkbook(wb,"E:/aya_local_2/Model/BH_Rampillon_All_A5.xlsx",overwrite =T)
+
+```
+
+**1617**
+```{r}
+
+data_1617 <- read.xlsx('E:/aya_local_2/Model/data_Rampillon_Mean_1617.xlsx',sheet = 'Pluie_ETP', startRow = 3,detectDates = T)
+
+for (i in 2:ncol(data_1617)){
+  
+  data_1617[,i] <- as.numeric(data_1617[,i])                                           #convert to numeric
+  
+}
+
+Vin  <- data_1617$`Vin.(m3)`
+Vout <- data_1617$`Vout.(m3)`
+P    <- data_1617$Ptot
+ETR  <- data_1617$ETP_P
+
+Vw <- NULL
+
+data_1617$Vw[1] <- A*0.5
+
+Vw <- data_1617$Vw
+
+for (i in 2:nrow(data_1617)-1){
+  
+  if (Vw[i]<A*0.2){
+    
+    Vw[i] <- A*0.2
+    
+  }
+  if (Vw[i]>A*0.8){
+    
+    Vw[i] <- A*0.8
+  }
+  
+  Vw[i+1] <- Vw[i] + Vin[i]-Vout[i] + (P[i]-ETR[i])*A/1000
+}
+
+Vw[nrow(data_1617)] <- Vw[nrow(data_1617)-1]
+
+data_1617$'Vw' <- Vw
+data_1617$'hw' <- Vw/A
+
+addWorksheet(wb,'BH_1617')
+
+writeDataTable(wb        =  wb,
+               sheet     = 'BH_1617',
+               x         =  data_1617,
+               bandedCols = T)
+
+saveWorkbook(wb,"E:/aya_local_2/Model/BH_Rampillon_All_A5.xlsx",overwrite =T)
+
+```
+
+**1718**
+```{r}
+
+data_1718 <- read.xlsx('E:/aya_local_2/Model/data_Rampillon_Mean_1718.xlsx',sheet = 'Pluie_ETP', startRow = 3,detectDates = T)
+
+for (i in 2:ncol(data_1718)){
+  
+  data_1718[,i] <- as.numeric(data_1718[,i])                                           #convert to numeric
+  
+}
+
+Vin  <- data_1718$`Vin.(m3)`
+Vout <- data_1718$`Vout.(m3)`
+P    <- data_1718$Ptot
+ETR  <- data_1718$ETP_P
+
+
+Vw <- NULL
+
+data_1718$Vw[1] <- A*0.5
+
+Vw <- data_1718$Vw
+
+for (i in 2:nrow(data_1718)-1){
+  
+  if (Vw[i]<A*0.2){
+    
+    Vw[i] <- A*0.2
+    
+  }
+  if (Vw[i]>A*0.8){
+    
+    Vw[i] <- A*0.8
+  }
+  
+  Vw[i+1] <- Vw[i] + Vin[i]-Vout[i] + (P[i]-ETR[i])*A/1000
+}
+
+Vw[nrow(data_1718)] <- Vw[nrow(data_1718)-1]
+
+data_1718$'Vw' <- Vw
+data_1718$'hw' <- Vw/A
+
+addWorksheet(wb,'BH_1718')
+
+writeDataTable(wb        =  wb,
+               sheet     = 'BH_1718',
+               x         =  data_1718,
+               bandedCols = T)
+
+saveWorkbook(wb,"E:/aya_local_2/Model/BH_Rampillon_All_A5.xlsx",overwrite =T)
+
+```
+
+**1819**
+```{r}
+
+data_1819 <- read.xlsx('E:/aya_local_2/Model/data_Rampillon_Mean_1819.xlsx',sheet = 'Pluie_ETP', startRow = 3,detectDates = T)
+
+for (i in 2:ncol(data_1819)){
+  
+  data_1819[,i] <- as.numeric(data_1819[,i])                                           #convert to numeric
+  
+}
+
+Vin  <- data_1819$`Vin.(m3)`
+Vout <- data_1819$`Vout.(m3)`
+P    <- data_1819$Ptot
+ETR  <- data_1819$ETP_P
+
+
+Vw <- NULL
+
+data_1819$Vw[1] <- A*0.5
+
+Vw <- data_1819$Vw
+
+for (i in 2:nrow(data_1819)-1){
+  
+  if (Vw[i]<A*0.2){
+    
+    Vw[i] <- A*0.2
+    
+  }
+  if (Vw[i]>A*0.8){
+    
+    Vw[i] <- A*0.8
+  }
+  
+  Vw[i+1] <- Vw[i] + Vin[i]-Vout[i] + (P[i]-ETR[i])*A/1000
+}
+
+Vw[nrow(data_1819)] <- Vw[nrow(data_1819)-1]
+
+data_1819$'Vw' <- Vw
+data_1819$'hw' <- Vw/A
+
+addWorksheet(wb,'BH_1819')
+
+writeDataTable(wb        =  wb,
+               sheet     = 'BH_1819',
+               x         =  data_1819,
+               bandedCols = T)
+
+saveWorkbook(wb,"E:/aya_local_2/Model/BH_Rampillon_All_A5.xlsx",overwrite =T)
+
+```
+
+**1920**
+```{r}
+
+data_1920 <- read.xlsx('E:/aya_local_2/Model/data_Rampillon_Mean_1920.xlsx',sheet = 'Pluie_ETP', startRow = 3,detectDates = T)
+
+for (i in 2:ncol(data_1920)){
+  
+  data_1920[,i] <- as.numeric(data_1920[,i])                                           #convert to numeric
+  
+}
+
+Vin  <- data_1920$`Vin.(m3)`
+Vout <- data_1920$`Vout.(m3)`
+P    <- data_1920$Ptot
+ETR  <- data_1920$ETP_P
+
+
+Vw <- NULL
+
+data_1920$Vw[1] <- A*0.5
+
+Vw <- data_1920$Vw
+
+for (i in 2:nrow(data_1920)-1){
+  
+  if (Vw[i]<A*0.2){
+    
+    Vw[i] <- A*0.2
+    
+  }
+  if (Vw[i]>A*0.8){
+    
+    Vw[i] <- A*0.8
+  }
+  
+  Vw[i+1] <- Vw[i] + Vin[i]-Vout[i] + (P[i]-ETR[i])*A/1000
+}
+
+Vw[nrow(data_1920)] <- Vw[nrow(data_1920)-1]
+
+data_1920$'Vw' <- Vw
+data_1920$'hw' <- Vw/A
+
+addWorksheet(wb,'BH_1920')
+
+writeDataTable(wb        =  wb,
+               sheet     = 'BH_1920',
+               x         =  data_1920,
+               bandedCols = T)
+
+saveWorkbook(wb,"E:/aya_local_2/Model/BH_Rampillon_All_A5.xlsx",overwrite =T)
+
+```

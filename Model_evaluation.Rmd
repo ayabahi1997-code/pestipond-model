@@ -1,0 +1,142 @@
+---
+title: "Model_evaluation_X"
+author: "Aya Bahi"
+date: "29/11/2022"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+**Set the file and call libraries**
+```{r include=FALSE}
+shell("cls")                                          #clear the console
+rm(list=ls())                                         #clear the environment
+if(!is.null(dev.list())) dev.off()                    #clear all plots
+setwd(getwd())                                        #set the location of the file
+library(tibble)                                       #to convert into a data_1 frame
+library(deSolve)                                      #call desolve library for the ode function
+library(ggplot2)                                      #for plots
+library(rootSolve)                                    #for jacobian
+library(deTestSet)                                    #for more solvers
+library(writexl)
+library(sensitivity)
+library(ODEsensitivity)
+library(openxlsx)
+library(hydroGOF)
+```
+
+
+```{r include=FALSE}
+
+# data_mean_1920  <- read.xlsx('D:/aya_local_2/Article_3/Cmoy_sim_obs.xlsx',sheet = '1920' , startRow = 5, detectDates = T)
+# 
+# Dates <- data_mean_1920$Date
+# 
+# data_1920 <- read.xlsx('D:/aya_local_2/Model/data_Rampillon_1920.xlsx',sheet = 'data_Chlorotoluron', detectDates = T)
+# 
+# d_Day <- data_1920$Day
+
+# Vin <- data_1920$`Vin.(m3)`
+# 
+# cumVin <- NULL
+# 
+# for (i in 1:length(Dates)){
+#   
+#   if (i == 1){
+#     
+#     cumVin[i] <- sum(Vin[1:which(d_Day==Dates[i])])
+#   } 
+#   
+#   else {
+#     
+#     cumVin[i] <- sum(Vin[(which(d_Day==Dates[i-1])+1):which(d_Day==Dates[i])])
+#   }
+#   
+# }
+
+```
+
+**Performance on Cmoy**
+```{r}
+######################################### PerformanceChlorotoluron ####################################################
+
+#data_Cmoy <- read.xlsx('D:/aya_local_2/Article_3/out_Cmoy_1920.xlsx' ,sheet = 'Sheet1',detectDates = T, startRow = 2)
+
+# C_obs_Chlorotoluron  <- data_Cmoy$Chlorotoluron_out
+# C_sim_Chlorotoluron  <- data_Cmoy$Chlorotoluron_sim
+# 
+# C_KGE_Chlorotoluron  <- KGE(sim = C_sim_Chlorotoluron, obs = C_obs_Chlorotoluron)
+# C_NSE_Chlorotoluron  <- NSE(sim = C_sim_Chlorotoluron, obs = C_obs_Chlorotoluron)
+# 
+# M_obs_Chlorotoluron  <- C_obs_Chlorotoluron*cumVin*1000
+# M_sim_Chlorotoluron  <- C_sim_Chlorotoluron*cumVin*1000
+# 
+# M_KGE_Chlorotoluron  <- KGE(sim = M_sim_Chlorotoluron, obs = M_obs_Chlorotoluron)
+# M_NSE_Chlorotoluron  <- NSE(sim = M_sim_Chlorotoluron, obs = M_obs_Chlorotoluron)
+# M_err_Chlorotoluron  <- mean(abs(M_obs_Chlorotoluron-M_sim_Chlorotoluron))/10^6
+
+# outputs_Chlorotoluron <- read.xlsx('D:/aya_local_2/Model/New_out_Chlorotoluron_1920_ASS.xlsx' ,sheet = 'Sheet1',detectDates = T)
+# 
+# C_obs_Chlorotoluron_daily  <- outputs_Chlorotoluron$Cout_obs
+# C_sim_Chlorotoluron_daily  <- outputs_Chlorotoluron$Cout_sim
+# 
+# C_KGE_Chlorotoluron_daily  <- KGE(sim = C_sim_Chlorotoluron_daily, obs = C_obs_Chlorotoluron_daily)
+# C_NSE_Chlorotoluron_daily  <- NSE(sim = C_sim_Chlorotoluron_daily, obs = C_obs_Chlorotoluron_daily)
+# C_RMSE_Chlorotoluron_daily <- nrmse(sim =C_sim_Chlorotoluron_daily, obs = C_obs_Chlorotoluron_daily)
+# 
+# 
+# 
+# cat(' C_KGE_Chlorotoluron_daily    = '   ,C_KGE_Chlorotoluron_daily,'\n',
+#     ' C_NSE_Chlorotoluron_daily    = '   ,C_NSE_Chlorotoluron_daily, '\n',
+#     ' C_RMSE_Chlorotoluron_daily   = '   ,C_RMSE_Chlorotoluron_daily, '\n')
+# 
+# 
+
+```
+
+**Performance on Cdaily**
+```{r}
+
+outputs_Chlorotoluron <- read.xlsx('E:/aya_local_2/Model/New_out_Chlorotoluron_1920_ASS.xlsx' ,sheet = 'Sheet1',detectDates = T)
+
+  
+C_obs_Chlorotoluron  <- outputs_Chlorotoluron$Cout_obs
+C_sim_Chlorotoluron  <- outputs_Chlorotoluron$Cout_sim
+
+M_obs_Chlorotoluron  <- outputs_Chlorotoluron$Mout_obs
+M_sim_Chlorotoluron  <- outputs_Chlorotoluron$Mout_sim
+
+C_KGE_Chlorotoluron  <- KGE(sim  = C_sim_Chlorotoluron,  obs = C_obs_Chlorotoluron)
+C_NSE_Chlorotoluron  <- NSE(sim  = C_sim_Chlorotoluron,  obs = C_obs_Chlorotoluron)
+C_RMSE_Chlorotoluron <- rmse(sim = C_sim_Chlorotoluron,  obs = C_obs_Chlorotoluron)/(max(C_obs_Chlorotoluron)-min(C_obs_Chlorotoluron))
+
+cat(' C_KGE_Chlorotoluron_daily    = '   ,C_KGE_Chlorotoluron ,'\n',
+    ' C_NSE_Chlorotoluron_daily    = '   ,C_NSE_Chlorotoluron , '\n',
+    ' C_RMSE_Chlorotoluron_daily   = '   ,C_RMSE_Chlorotoluron, '\n')
+
+
+```
+
+**Statistics on Cdaily**
+```{r}
+
+outputs <- read.xlsx('D:/aya_local_2/Article_3/All_Cmoy_obs_sim_fusion.xlsx' ,sheet = '1415',
+                     detectDates = T,startRow = 2, rows = 2:19)
+
+  
+C_obs_Chlorotoluron  <- outputs$Chlorotoluron_out
+C_sim_Chlorotoluron  <- outputs$Chlorotoluron_sim
+
+t_test            <- t.test(C_obs_Chlorotoluron, C_sim_Chlorotoluron)
+reg               <- lm(C_obs_Chlorotoluron ~ C_sim_Chlorotoluron)
+R2                <- summary(reg)
+C_NRMSE_Chlorotoluron <- rmse(sim = C_sim_Chlorotoluron,  obs = C_obs_Chlorotoluron)/(max(C_obs_Chlorotoluron)-min(C_obs_Chlorotoluron))
+
+# cat('Chlorotoluron_ t_test    = '  ,t_test$statistic ,'\n',
+#     'Chlorotoluron_p_value'        , t_test$p.value ,'\n',
+#     'Chlorotoluron_R2    = '       , R2$r.squared , '\n',
+#     'Chlorotoluron_NRMSE   = '     ,C_NRMSE_Chlorotoluron, '\n')
+
+print(R2)
+```
+

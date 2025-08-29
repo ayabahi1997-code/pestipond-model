@@ -1,0 +1,278 @@
+---
+title: "SA_Sobol"
+author: "Aya Bahi"
+date: "08/02/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**--------------------------------------------------------- Prepare the inputs (external variables of the model) -------------------------------------------------------------**
+
+**Set the file and call libraries**
+```{r include=FALSE}
+shell("cls")                                          #clear the console
+rm(list=ls())                                         #clear the environment
+if(!is.null(dev.list())) dev.off()                    #clear all plots
+setwd(getwd())                                        #set the location of the file
+                                                      #check it
+
+library(tibble)                                       #to convert into a data_1 frame
+library(deSolve)                                      #call desolve library for the ode function
+library(ggplot2)                                      #for plots
+library(rootSolve)                                    #for jacobian
+library(deTestSet)                                    #for more solvers
+library(writexl)
+library(sensitivity)
+library(ODEsensitivity)
+library(knitr)
+library(progress)
+library(foreach)
+library(doSNOW)
+library(parallel)
+
+```
+
+**Read the data** 
+```{r}
+data_1 <- read.csv2("data_1.csv", header = FALSE, skip=0, nrows = 101)          #read the CSV file of data_1 avec sep = ; et dec = ,
+names(data_1)=data_1[1,]                                                        #rename the columns of the data_1 frame by the names in excel
+data_1 <- data_1[-1,1:11]                                                       #delete the first line
+row.names(data_1)= data_1[,2]                                                   #rename the lines of data_1 with step i
+
+data_1$Date       <- as.Date(data_1$Day , format = "%d/%m/%Y")                  #convert day (d/m/y) to date
+data_1            <- data_1[,-1]                                                #remove the old date column
+data_1            <- as.data.frame(data_1)                                      #convert to a data frame
+data_1            <- data_1[,c(11,1:10)]                                        #reorder columns
+
+for (i in 2:11){
+  
+  data_1[,i] <- as.numeric(data_1[,i])                                          #convert to numeric
+  
+}
+data_1 <- as.data.frame(data_1)
+
+A         <- 5269  #m2
+Mveg      <- 0.6*11e6/100 #g
+ds1       <- 1
+
+```
+
+**Build the input functions**
+```{r}
+
+Qin       <- approxfun(data_1$`Step i`, data_1$`Qin (l/s)`, method = 'constant', rule = 2)
+Qout      <- approxfun(data_1$`Step i`, data_1$`Qout (l/s)`,method = 'constant', rule = 2)
+TSS_in    <- approxfun(data_1$`Step i`, data_1$`TSS_in (g/l)`,method = 'constant', rule = 2)
+TSS_out   <- approxfun(data_1$`Step i`, data_1$`TSS_out (g/l)`,method = 'constant', rule = 2)
+Cin       <- approxfun(data_1$`Step i`, data_1$`Cin (ug/l)`,method = 'constant', rule = 2)
+Cp_in     <- approxfun(data_1$`Step i`, data_1$`Cp_in(ug/g)`,method = 'constant', rule = 2)
+TC        <- approxfun(data_1$`Step i`, data_1$`T (°C)`,method = 'constant', rule = 2)
+
+inputs                 <- NULL
+inputs$'time'          <- seq(1,100,by=0.01)
+  
+inputs                 <- as.data.frame(inputs)
+  
+inputs$'TC'            <- TC(inputs$'time')
+inputs$'Qin(l/s)'      <- Qin(inputs$'time')
+inputs$'Qout(l/s)'     <- Qout(inputs$'time')
+inputs$'TSS_in (g/l)'  <- TSS_in(inputs$'time')
+inputs$'TSS_out (g/l)' <- TSS_out(inputs$'time')
+inputs$'Cdiss_in(ug/l)'<- Cin(inputs$'time')
+inputs$'Cp_in(ug/g)'   <- Cp_in(inputs$'time')
+```
+
+**------------------------------------------------------------- Sensitivity analysis with Sobol indices ------------------------------------------------------------------**
+
+**Create the Monte Carlo Matrix**
+```{r}
+
+n <- 1000 #number of samples
+
+#create the 1st matrix X1 (A)
+#X1 contains n samples of every parameter.
+
+X1 <- data.frame("vs"       = runif(n = n, min =0.00025,max=0.25),
+                 "vr"       = runif(n = n, min =4e-08,  max=2.4e-05),
+                 "kbio_w"   = runif(n = n, min =0.002,  max=0.70), #3 kdeg PCPF-R
+                 "kbio_TSS" = runif(n = n, min =0.002,  max=0.70),
+                 "kbio_sed" = runif(n = n, min =0.002,  max=0.70),
+                 "kbio_veg" = runif(n = n, min =0.002,  max=0.70),
+                 "kp"       = runif(n = n, min =0.002,  max=0.70),#3 kp PCPF-R
+                 "kv"       = runif(n = n, min =0.002,  max=0.70), 
+                 "kads_sed" = runif(n = n, min =1.4e-5, max=1.2),
+                 "kads_TSS" = runif(n = n, min =1.4e-5, max=1.2),
+                 "kads_veg" = runif(n = n, min =1.4e-5, max=1.2),
+                 "Kd"       = runif(n = n, min =1,      max=4),#3 Kd PCPF-
+                 "teta"     = runif(n = n, min =1.1,    max=1.5),
+                 "phi"      = runif(n = n, min =0.20,   max=0.95),#1"phi"= runif(n = n, min =0.2,    max=0.7)
+                 "rhob"     = runif(n = n, min =0.84,   max=1.03))
+
+#create the 2nd matrix X2 (B)
+
+X2 <- data.frame("vs"       = runif(n = n, min =0.00025,max=0.25),
+                 "vr"       = runif(n = n, min =4e-08,  max=2.4e-05),
+                 "kbio_w"   = runif(n = n, min =0.002,  max=0.70), #3 kdeg PCPF-R
+                 "kbio_TSS" = runif(n = n, min =0.002,  max=0.70),
+                 "kbio_sed" = runif(n = n, min =0.002,  max=0.70),
+                 "kbio_veg" = runif(n = n, min =0.002,  max=0.70),
+                 "kp"       = runif(n = n, min =0.002,  max=0.70),#3 kp PCPF-R
+                 "kv"       = runif(n = n, min =0.002,  max=0.70), 
+                 "kads_sed" = runif(n = n, min =1.4e-5, max=1.2),
+                 "kads_TSS" = runif(n = n, min =1.4e-5, max=1.2),
+                 "kads_veg" = runif(n = n, min =1.4e-5, max=1.2),
+                 "Kd"       = runif(n = n, min =1,      max=4),#3 Kd PCPF-
+                 "teta"     = runif(n = n, min =1.1,    max=1.5),
+                 "phi"      = runif(n = n, min =0.20,   max=0.95),#1"phi"= runif(n = n, min =0.2,    max=0.7)
+                 "rhob"     = runif(n = n, min =0.84,   max=1.03))
+
+#create the MC matrix X_MC (C). 
+
+X_MC <- soboljansen(X1 = X1, X2 = X2)
+
+MC   <- X_MC$X # MC matrix with a 15000 (n*(p+2)) sample for each parameter, it's the combination A,B, Ab (we replace all the parameters in A with those in B except the pi)
+
+saveRDS(MC, paste0(getwd(),'/MC_matrix_15.RDS'))
+
+```
+
+**Progress bar**
+```{r}
+iterations  <- nrow(MC) #number of samples to run
+
+pb          <- progress_bar$new(format = "Progress [:bar] :elapsedfull || Time left: :eta",  #create the progress bar
+                                    total = iterations,    # 15000
+                                    width = 60)
+progress    <- function(n) {pb$tick()}      #function that calls the progress bar
+
+opts        <- list(progress = progress)    #to view the progress bar in the parallelization
+
+```
+
+
+**Preparing the parallelization**
+```{r}
+
+cl                     <- makeCluster(spec = detectCores()-1, outfile="") #create a cluster of 2 nodes/cores to work in
+registerDoSNOW(cl)                                          #register it to be used by %dopar% in foreach
+getDoParRegistered()                                        #check if it is registered 
+getDoParWorkers()                                           #how many workers (nodes/cores) are available ? (2)
+
+if(!dir.exists(paste0(getwd(),"/SA_OUTPUTS_15/"))){dir.create(paste0(getwd(),"/SA_OUTPUTS_15/"))}           #create a file where to save the SA outputs files
+PACKAGES    <- c("tibble","deSolve","rootSolve","deTestSet","writexl","sensitivity","ODEsensitivity")     #list of all the needed packages in other sessions 
+
+```
+
+**Running the parallelization**
+```{r}
+
+foreach(i = 1:iterations, .options.snow = opts)%dopar% {
+  
+  lapply(PACKAGES, library, character.only = T)
+  
+  model <- function(t, y, parms){
+
+    with(as.list(c(parms,y)),{
+      
+      dMTSS  <- TSS_in(t) * Qin(t) * 24*3600  -  TSS_out(t) * Qout(t) * 24*3600 - 
+        
+                vs/(1-Msed/(rhob*A*10^6)) * MTSS + vr/(1-Msed/(rhob*A*10^6)) * Msed  #g/d 
+      
+      #MTSS(0) and Msed(0) should respect the MB at t=0, ds(t=1day) = 1cm, ds(t=-1day) = 0.
+       
+      dMsed  <- vs/(1-Msed/(rhob*A*10^6)) * MTSS - vr/(1-Msed/(rhob*A*10^6)) * Msed  #g/d
+       
+
+      dCdiss <- 1/(A*(1-Msed/(rhob*A*10^6))*phi) * Qin(t) * Cin(t)*24*3600/1000- 1/(A*(1-Msed/(rhob*A*10^6))*phi) * Qout(t) * Cdiss*24*3600/1000 -
+        
+                (kbio_w + kp + kv) * teta ^ (TC(t)-20) *  Cdiss - 1/(1-Msed/(rhob*A*10^6)) *(-dMsed/(rhob*A*10^6)) * Cdiss +
+                 
+                kads_sed*1e3/(Kd) * Cs + kads_TSS*1e3/(Kd) * Cp + kads_veg*1e3/(Kd*phi) * Cv - 
+        
+                (kads_sed + kads_TSS + kads_veg) * Cdiss
+                 
+      
+      dCp    <- 1/(MTSS*phi) * TSS_in(t) * Qin(t) * Cp_in(t)*24*3600- 1/(MTSS*phi) * TSS_out(t) * Qout(t) * Cp*24*3600- kbio_TSS * teta ^ (TC(t)-20) * Cp -
+        
+                1/MTSS * dMsed * Cp - kads_TSS * (1-Msed/(rhob*A*10^6)) * A/(MTSS*Kd*1e-6) * Cp + 
+        
+                1/MTSS * kads_TSS * A * (1-Msed/(rhob*A*10^6)) * 1000 * Cdiss -
+        
+                1/(1-Msed/(rhob*A*10^6)) * vs * Cp + Msed/MTSS * 1/(1-Msed/(rhob*A*10^6)) * vr * Cs
+      
+        
+      dCs    <- -kbio_sed * teta ^ (TC(t)-20) * Cs - 1/Msed * dMsed * Cs - kads_sed * (1-Msed/(rhob*A*10^6)) * A/(Msed*Kd*1e-6) * Cs +
+        
+                1/Msed * kads_sed * A * (1-Msed/(rhob*A*10^6)) * 1000 * Cdiss + MTSS/Msed * 1/(1-Msed/(rhob*A*10^6)) * vs *  Cp - 1/(1-Msed/(rhob*A*10^6)) * vr * Cs
+
+      dCv    <- -kbio_veg * teta ^ (TC(t)-20) * Cv - kads_veg * (1-Msed/(rhob*A*10^6)) * A/(Mveg*Kd*1e-6) * Cv +
+        
+                1/Mveg * kads_veg * A * (1-Msed/(rhob*A*10^6)) * 1000 * phi * Cdiss
+
+      list(c(dMTSS,dMsed,dCdiss,dCp,dCs,dCv))
+
+    })
+}
+  
+  parms <- MC[i,1:ncol(MC)]
+
+  times <- seq(1, 100, by = 0.01)
+
+    yin <- c(MTSS=MC$vr[i]*0.01*MC$rhob[i]*A*10^4*ds1/(1-MC$vr[i]*0.01),
+         Msed= MC$rhob[i]*A*10^4*ds1,
+         Cdiss=0,
+         Cp=0,
+         Cs=0,
+         Cv=0)
+
+  out <- as.data.frame(ode(yin, times, model, parms, method = 'lsoda', verbose = F, atol=1e-12, rtol=1e-12))
+
+  i_name <- i
+  if(nchar(i) != 5){
+    i_name <- paste0(paste0(rep(0,5-nchar(i_name)), collapse = ""),i_name,collapse = "")
+    } #to number the SA_OUTPUT files, collapse is to put all the numbers in one
+  
+    saveRDS(object = list("PARAM"  = data.frame("ITER" = i,parms), #the result will be a list of the sample i of parms and the corresponding outputs
+                          "OUTPUT" = as.data.frame(out)),
+             
+            file   = paste0(getwd(),"/SA_OUTPUTS_15/",i_name,".RDS")) #where to save the output file for each sample  i
+}
+
+stopCluster(cl) 
+
+#need to wait 4 minutes before the progress bar appears (which means that the  creation of the output files starts after 4 minutes of the runn all)
+
+```
+
+
+**------------------------------------------------------------- Model responses (OUTPUTS files) ------------------------------------------------------------------**
+
+**Check if there is non NaN in the SA_OUTPUTS files**
+```{r}
+t1 <- Sys.time()
+
+SA_OUTPUTS_files <- list.files(paste0(getwd(),'/SA_OUTPUTS_15/')) #list of the SA_OUTPUTS files
+
+S_NaN            <- NULL
+
+for (i in 1:length(SA_OUTPUTS_files)){
+  
+   file_i           <- readRDS(paste0(getwd(),'/SA_OUTPUTS_15/',SA_OUTPUTS_files[i]))
+  
+   #sum of logical (T/F) in the SA_OUTPUTS results, if 0 then there is non NaN is the SA_OUTPUTS
+  
+   S_NaN$Cdiss[i] <- as.numeric(sum(is.nan(file_i[[2]]$Cdiss))) 
+   S_NaN$Cps[i]   <- as.numeric(sum(is.nan(file_i[[2]]$Cp)))
+   S_NaN$Cs[i]    <- as.numeric(sum(is.nan(file_i[[2]]$Cds)))
+   S_NaN$Cv[i]    <- as.numeric(sum(is.nan(file_i[[2]]$Cv)))
+}
+S_NaN   <- as.data.frame(S_NaN)
+sum(S_NaN) #if 0 it's good !
+
+t2 <- Sys.time()
+difftime(t2,t1)
+
+```
